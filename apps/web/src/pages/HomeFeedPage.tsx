@@ -1,6 +1,10 @@
 import { Stack } from "@gql-book-review/shared-ui";
 import { ReviewCard } from "../components/ReviewCard";
-import { dummyFeed } from "../dummy";
+import { dummyFeed, DummyReview } from "../dummy";
+import { useEffect, useState } from "react";
+import { apiGet } from "../lib/api";
+import { getViewerId } from "../viewer";
+
 
 // ─────────────────────────────────────────────────────────────
 // Step 1에서 채워 넣을 자리:
@@ -17,8 +21,31 @@ import { dummyFeed } from "../dummy";
 // ─────────────────────────────────────────────────────────────
 
 export function HomeFeedPage() {
-  // TODO: replace dummy data with real fetch (apps/web/src/lib/api.ts 참고)
-  const data = dummyFeed;
+  const [data, setData] = useState([]);
+
+  useEffect(() => {
+    const currentViewerId = getViewerId();
+    const fetchFollowing = async () => {
+      const followers = await apiGet(`/users/${currentViewerId}/following`);
+      const reviews = [];
+      for (const f of followers.items) {
+        const res = await apiGet(`/users/${f}/reviews?page=1`);
+        reviews.push(...res.items);
+      }
+      for (const r of reviews) {
+        const book = await apiGet(`/books/${r.bookId}`);
+        r.book = book;
+        const author = await apiGet(`/users/${r.authorId}`);
+        r.author = author;
+      }
+      for (const r of reviews) {
+        const likeRes = await apiGet(`/me/likes?reviewIds=${r.id}`);
+        r.likedByMe = likeRes.items.includes(r.id);
+      }
+      setData(reviews);
+    };
+    fetchFollowing();
+  }, []);
 
   return (
     <Stack gap={16}>

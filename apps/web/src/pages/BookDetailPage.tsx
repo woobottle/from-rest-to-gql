@@ -1,7 +1,8 @@
 import { Card, Stack } from "@gql-book-review/shared-ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ReviewCard } from "../components/ReviewCard";
 import { dummyBookDetail } from "../dummy";
+import { apiGet } from "../lib/api";
 
 // ─────────────────────────────────────────────────────────────
 // Step 1에서 채워 넣을 자리:
@@ -19,9 +20,33 @@ import { dummyBookDetail } from "../dummy";
 // ─────────────────────────────────────────────────────────────
 
 export function BookDetailPage() {
-  // TODO: replace dummy data with real fetch
-  const { book, reviews } = dummyBookDetail;
   const [expanded, setExpanded] = useState(false);
+  const [book, setBook] = useState();
+  const [reviews, setReviews] = useState([]);
+  
+  useEffect(() => {
+    const fetchBookDetail = async () => { 
+      const bookId = 'b1'; // 실제로는 URL에서 ID를 읽어와야겠죠?
+      const bookRes = await apiGet(`/books/${bookId}`);
+      const reviewsRes = await apiGet(`/books/${bookId}/reviews`);
+      const reviews = reviewsRes.items;
+      for (const r of reviews) {
+        const author = await apiGet(`/users/${r.authorId}`);
+        r.author = author;
+      }
+      for (const r of reviews) {
+        const likeRes = await apiGet(`/me/likes?reviewIds=${r.id}`);
+        r.likedByMe = likeRes.items.includes(r.id);
+      }
+      setBook(bookRes);
+      setReviews(reviews);
+    };
+    fetchBookDetail();
+  }, []);
+
+  if(book === undefined) {
+    return <div>Loading...</div>;
+  }
 
   return (
     <Stack gap={16}>
