@@ -8,6 +8,80 @@
 # 시작용으로 hello query만 들어 있습니다. 자유롭게 지우고 시작하세요.
 # ─────────────────────────────────────────────────────────────
 
-type Query {
-  hello: String!
+type Book {
+  id: ID!
+  title: String!
+  author: String!
+  coverUrl: String
+  description: String
+  isbn: String!
+  publishedAt: String!
+  publisher: String!
+  category: String!
+  pageCount: Int!
+  averageRating: Float
+}
+
+type Review {
+  id: ID!
+  book: Book!
+  author: User!
+  rating: Int!
+  content: String
+  likeCount: Int
+  createdAt: String!
+  likedByMe: Boolean!
+  draftContent: String # 작성자에게만 존재
+  reportCount: Int # admin에게만 존재
+} 
+
+type User {
+  id: ID!
+  email: String # 본인이 아니면 null
+  name: String!
+  avatarUrl: String
+  bio: String
+  email: String!
+  joinedAt: String!
+  role: String!
+  followedByMe: Boolean!
+}
+
+type Comment {
+  id: ID!
+  reviewId: ID!
+  authorId: ID!
+  content: String!
+  createdAt: String!
+}
+
+query HomeFeed($cursor: String) {
+  feed(cursor: $cursor) {
+    reviews {
+      id
+      book {
+        title
+        author
+        coverUrl
+      }
+      author {
+        name
+        avatarUrl
+      }
+      rating
+      content
+      likeCount
+      createdAt
+    }
+    nextCursor
+  }
+}
+
+query BookDetail {
+}
+
+query UserProfile {
+}
+
+query Search {
 }
