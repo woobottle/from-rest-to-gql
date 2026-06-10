@@ -1,7 +1,7 @@
 import { Stack } from "@gql-book-review/shared-ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BookCard } from "../components/BookCard";
-import { dummySearchResults } from "../dummy";
+import { apiGet } from "../lib/api";
 
 // ─────────────────────────────────────────────────────────────
 // Step 1에서 채워 넣을 자리:
@@ -17,7 +17,19 @@ import { dummySearchResults } from "../dummy";
 export function SearchPage() {
   const [q, setQ] = useState("");
   // TODO: 검색어가 바뀔 때 GET /books?q=... 호출해서 results 교체
-  const results = dummySearchResults;
+  const [results, setResults] = useState([]);
+
+  useEffect(() => {
+    const fetchResults = async () => {
+      if (q.trim() === "") {
+        setResults([]);
+        return;
+      }
+      const res = await apiGet(`/books?q=${encodeURIComponent(q)}&page=1`);
+      setResults(res.items);
+    };
+    fetchResults();
+  }, [q]);
 
   return (
     <Stack gap={16}>

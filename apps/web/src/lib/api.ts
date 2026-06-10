@@ -16,14 +16,11 @@ import { getViewerId } from "../viewer";
 export const REST_BASE_URL = "http://localhost:4100";
 
 export async function apiGet<T>(path: string): Promise<T> {
-  // TODO: implement
-  // 힌트:
-  //   const res = await fetch(`${REST_BASE_URL}${path}`, {
-  //     headers: { "X-Viewer-Id": getViewerId() },
-  //   });
-  //   if (!res.ok) throw new Error(`${res.status} ${path}`);
-  //   return res.json();
-  throw new Error("apiGet not implemented");
+  const res = await fetch(`${REST_BASE_URL}${path}`, {
+    headers: { "X-Viewer-Id": getViewerId() },
+  });
+  if (!res.ok) throw new Error(`${res.status} ${path}`);
+  return res.json();
 }
 
 // 참고용 — 멘티가 직접 호출에서 호출 수를 보고 싶을 때 쓸 수 있는 헬퍼

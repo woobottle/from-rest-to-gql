@@ -222,10 +222,13 @@ pnpm -F web dev
 
 각 화면을 한 번 그릴 때 다음을 측정해서 README에 표로 정리하세요. (DevTools Network 탭 + 네트워크 throttling은 "Fast 3G")
 
-- 총 HTTP 호출 수
-- waterfall 깊이 (의존 사슬의 최대 단계)
-- 응답으로 받은 필드 중 **실제 화면에 쓰인 비율** — 적당히 추산해도 돼요 (응답 키 개수 / 화면이 읽는 키 개수)
-- 가장 느린 단일 호출의 TTFB
+- 총 HTTP 호출 수 (화면이 부르는 REST endpoint 수)
+// HomeFeedPage => 100번 호출
+// BookDetailPage => 22번 호출
+// UserProfilePage => 28번 호출
+- waterfall 깊이 (의존 사슬의 최대 단계) // 3단계
+- 응답으로 받은 필드 중 **실제 화면에 쓰인 비율** — 적당히 추산해도 돼요 (응답 키 개수 / 화면이 읽는 키 개수) // 6/34
+- 가장 느린 단일 호출의 TTFB // 280000ms
 
 ### ✅ 완료 기준
 

@@ -1,6 +1,8 @@
 import { Card, Stack } from "@gql-book-review/shared-ui";
 import { ReviewCard } from "../components/ReviewCard";
 import { dummyProfile } from "../dummy";
+import { useEffect, useState } from "react";
+import { apiGet } from "../lib/api";
 
 // ─────────────────────────────────────────────────────────────
 // Step 1에서 채워 넣을 자리:
@@ -16,8 +18,41 @@ import { dummyProfile } from "../dummy";
 // ─────────────────────────────────────────────────────────────
 
 export function UserProfilePage() {
-  // TODO: replace dummy data with real fetch
-  const { user, followedByMe, reviews } = dummyProfile;
+  const [user, setUser] = useState(null);
+  const [followedByMe, setFollowedByMe] = useState(false);
+  const [reviews, setReviews] = useState([]);
+  
+  useEffect(() => {
+    const userId = 'u3';
+    const fetchData = async () => {
+      const userRes = await apiGet(`/users/${userId}`);
+      const reviewsRes = await apiGet(`/users/${userId}/reviews`);
+      const reviews = reviewsRes.items;
+      
+      const bookAndAuthorPromises = reviews.map((r) => {
+        return Promise.all([
+          apiGet(`/books/${r.bookId}`),
+          apiGet(`/users/${r.authorId}`)
+        ]).then(([book, author]) => {
+          r.book = book;
+          r.author = author;
+        });
+      });
+      await Promise.all(bookAndAuthorPromises);
+      
+      const followRes = await apiGet(`/me/follows?userIds=${userId}`);
+      const followedByMe = followRes.items.includes(userId);
+      setUser(userRes);
+      setFollowedByMe(followedByMe);
+      setReviews(reviews);
+    };
+
+    fetchData();
+  }, [])
+
+  if (user === null || reviews === null) {
+    return <div>Loading...</div>;
+  }
 
   return (
     <Stack gap={16}>
