@@ -16,6 +16,32 @@ const isAdmin = (context: Context) => context.viewer?.role === "admin";
 
 export const resolvers: Record<string, unknown> = {
     Query: {
+        homeFeed: async (_parent: unknown, args: { first?: number; after?: string }, context: Context) => {
+            if (!context.viewer) return { reviews: [], nextCursor: null }; // 비로그인 → 빈 피드 (에러 아님)
+            
+            const { items: followingIds } = await context.rest.get<{ items: string[] }>(`/users/${context.viewer.id}/following`);
+
+            const perUser = await Promise.all(
+                followingIds.map((id) =>
+                    context.rest.get<{ items: unknown[]; total: number; page: number; pageSize: number }>(
+                        `/users/${id}/reviews?page=1`,
+                    ),
+                ),
+            );
+
+            const all = perUser.flatMap((res) => res.items);
+            all.sort((a,b) => b.createdAt.localeCompare(a.createdAt)); // 최신순 정렬
+
+            const first = args.first ?? 10;
+            const start = args.after ? Number(args.after) : 0;
+            const slice = all.slice(start, start + first);
+            const hasMore = start + first < all.length;
+
+            return {
+                reviews: slice,
+                nextCursor: hasMore ? String(start + first) : null,
+            };
+        },
         book: (_parent: unknown, args: { id: string }, context: Context) => {
             return context.rest.get(`/books/${args.id}`);
         }
@@ -39,15 +65,21 @@ export const resolvers: Record<string, unknown> = {
 
     Review: {
         // raw Review 의 authorId → User 객체로. (★ 리뷰마다 1번씩 = 순진한 N+1)
+        // rest.get 대신 loader.load — 같은 tick 의 호출들이 batch 로 묶이고 중복 id 는 제거된다.
         author: (parent: { authorId: string }, _args: unknown, context: Context) => {
-            return context.rest.get(`/users/${parent.authorId}`);
+            return context.loaders.user.load(parent.authorId);
+        },
+
+        // raw Review 의 bookId → Book 객체로. (홈 피드/프로필에서 책 표지·제목용)
+        book: (parent: { bookId: string }, _args: unknown, context: Context) => {
+            return context.loaders.book.load(parent.bookId);
         },
 
         // viewer 파생 필드. 비로그인이면 false (Boolean! 이라 null 금지).
-        likedByMe: async (parent: { id: string }, _args: unknown, context: Context) => {
+        // batch endpoint 가 있는 케이스 → loader 가 /me/likes 를 1번으로 묶는다.
+        likedByMe: (parent: { id: string }, _args: unknown, context: Context) => {
             if (!context.viewer) return false;
-            const res = await context.rest.get<{ items: string[] }>(`/me/likes?reviewIds=${parent.id}`);
-            return res.items.includes(parent.id);
+            return context.loaders.liked.load(parent.id);
         },
 
         // ── viewer 의존 가시성 필드 ──
