@@ -1,87 +1,165 @@
 # ─────────────────────────────────────────────────────────────
-# 👇 멘티가 채워 넣을 자리
+# Step 2 — 화면이 원하는 모양에서 출발한 스키마
 #
-# Step 2에서 스키마를 직접 설계해 주세요.
-# 화면 4개(홈 피드 / 책 상세 / 유저 프로필 / 검색)가 각각 단일 query로
-# 그려질 수 있는 type / field / 페이지네이션 / Mutation 모양을 결정합니다.
-#
-# 시작용으로 hello query만 들어 있습니다. 자유롭게 지우고 시작하세요.
+# 설계 원칙:
+#  1) REST 응답을 그대로 옮기지 않는다. 4개 화면(홈 피드 / 책 상세 /
+#     유저 프로필 / 검색)이 각각 "단일 query"로 그려지는 모양이 출발점.
+#  2) 관계는 외래키(bookId/authorId)가 아니라 객체로 노출한다.
+#     → review { book { title } author { name } } 가 한 query로 끝난다.
+#  3) non-null(!)은 "BE가 반드시 채워준다"는 약속. viewer 가시성으로
+#     가려질 수 있는 필드는 일부러 nullable로 둔다(null = 거부의 표현).
+#  4) 페이지네이션은 단순 Connection({ reviews, nextCursor })으로 통일.
 # ─────────────────────────────────────────────────────────────
 
-type Book {
+# Node: 모든 엔티티가 가지는 전역 고유 id 계약.
+interface Node {
+  id: ID!
+}
+
+# ── Book ──────────────────────────────────────────────────────
+type Book implements Node {
   id: ID!
   title: String!
-  author: String!
-  coverUrl: String
-  description: String
+  author: String!          # 저자명(문자열). 유저(User)와는 다른 개념이라 그대로 둔다.
+  coverUrl: String         # 표지는 없을 수 있다 → nullable
+  description: String       # 상세 화면에서만 쓰는 큰 텍스트 → nullable
   isbn: String!
   publishedAt: String!
   publisher: String!
   category: String!
   pageCount: Int!
-  averageRating: Float
+  averageRating: Float!     # REST가 항상 집계해 주므로 non-null 약속
+  reviewCount: Int!
+
+  # 책 상세 화면의 리뷰 목록. 수백~수천 개로 열려 있어 페이지네이션 → Connection.
+  reviews(first: Int, after: String): ReviewConnection!
 }
 
-type Review {
+# ── User ──────────────────────────────────────────────────────
+type User implements Node {
   id: ID!
+  name: String!
+  avatarUrl: String        # 없을 수 있음
+  bio: String              # 없을 수 있음
+  joinedAt: String!
+  role: Role!
+  followerCount: Int!
+  followingCount: Int!
+  reviewCount: Int!
+
+  email: String
+  bannedAt: String # bannedAt: admin 만 볼 수 있는 운영 필드. 일반 유저에겐 null.
+  followedByMe: Boolean!
+  reviews(first: Int, after: String): ReviewConnection!
+}
+
+enum Role {
+  user
+  admin
+}
+
+# ── Review ────────────────────────────────────────────────────
+type Review implements Node {
+  id: ID!
+  # 외래키 대신 관계 객체로 노출 (REST 의 bookId/authorId 를 대체)
   book: Book!
   author: User!
   rating: Int!
-  content: String
-  likeCount: Int
+  content: String          # 본문이 비어있는 리뷰(별점만)도 허용 → nullable
+  likeCount: Int!
+  commentCount: Int!
   createdAt: String!
-  likedByMe: Boolean!
-  draftContent: String # 작성자에게만 존재
-  reportCount: Int # admin에게만 존재
-} 
+  updatedAt: String!
 
-type User {
-  id: ID!
-  email: String # 본인이 아니면 null
-  name: String!
-  avatarUrl: String
-  bio: String
-  email: String!
-  joinedAt: String!
-  role: String!
-  followedByMe: Boolean!
+  # ── viewer-derived 필드 ──
+  # "내가 이 리뷰에 좋아요를 눌렀나". 비로그인이면 false → Boolean!.
+  likedByMe: Boolean!
+
+  # ── viewer 의존 가시성 필드 ──
+  # draftContent: 작성자 본인만. 남이 보면 null.
+  draftContent: String
+  # reportCount: admin 만. 일반 유저에겐 null.
+  reportCount: Int
+
+  # 리뷰의 댓글. 보통 적은 수라 단순 list 로 둔다.
+  # (열려 있고 많아지면 CommentConnection 으로 승격하면 된다.)
+  comments: [Comment!]!
 }
 
-type Comment {
+type Comment implements Node {
   id: ID!
-  reviewId: ID!
-  authorId: ID!
+  review: Review!
+  author: User!
   content: String!
   createdAt: String!
 }
 
-query HomeFeed($cursor: String) {
-  feed(cursor: $cursor) {
-    reviews {
-      id
-      book {
-        title
-        author
-        coverUrl
-      }
-      author {
-        name
-        avatarUrl
-      }
-      rating
-      content
-      likeCount
-      createdAt
-    }
-    nextCursor
-  }
+# ── 페이지네이션 (Connection) ────────────────────────────
+type ReviewConnection {
+  reviews: [Review!]!
+  nextCursor: String
 }
 
-query BookDetail {
+type BookConnection {
+  books: [Book!]!
+  nextCursor: String
 }
 
-query UserProfile {
+# ── Query (root operation type) ───────────────────────────────
+type Query {
+  # 홈 피드 화면: "내가 팔로우한 사람들의 최근 리뷰". 무한 스크롤 → Connection.
+  homeFeed(first: Int, after: String): ReviewConnection!
+
+  # 책 상세 화면
+  book(id: ID!): Book
+
+  # 유저 프로필 화면
+  user(id: ID!): User
+
+  search(query: String!, first: Int, after: String): BookConnection!
 }
 
-query Search {
+# ── Mutation ───────────────────
+# 관습: 입력은 input 타입, 출력은 payload 타입으로 분리한다.
+# 모델 타입(Review!)을 input 으로 받지 않는다.
+type Mutation {
+  createReview(input: CreateReviewInput!): ReviewPayload!
+  updateReview(input: UpdateReviewInput!): ReviewPayload!
+  deleteReview(input: DeleteReviewInput!): DeleteReviewPayload!
+
+  likeReview(input: LikeReviewInput!): ReviewPayload!
+  unlikeReview(input: LikeReviewInput!): ReviewPayload!
+
+  followUser(input: FollowUserInput!): UserPayload!
+  unfollowUser(input: FollowUserInput!): UserPayload!
+}
+
+input CreateReviewInput {
+  bookId: ID!
+  rating: Int!
+  content: String
+}
+input UpdateReviewInput {
+  reviewId: ID!
+  rating: Int
+  content: String
+}
+input DeleteReviewInput {
+  reviewId: ID!
+}
+input LikeReviewInput {
+  reviewId: ID!
+}
+input FollowUserInput {
+  userId: ID!
+}
+
+type ReviewPayload {
+  review: Review
+}
+type DeleteReviewPayload {
+  deletedReviewId: ID
+}
+type UserPayload {
+  user: User
 }

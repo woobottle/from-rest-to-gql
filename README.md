@@ -298,6 +298,11 @@ query HomeFeed($cursor: String) {
 - Mutation의 input/payload 모양
 - `Node` 인터페이스(`id: ID!`)를 도입할지 — 도입하면 클라이언트 캐시 정규화에 어떤 이득이 있는지
 
+==========
+
+- 페이지네이션 모양 — Connection을 쓴 필드와 단순 list를 쓴 필드, 그 차이 => Connection을 쓰면 커서 기반 페이지네이션이 가능해지고 단순 list를 쓰면 모든 데이터를 한번에 받아온다
+
+
 **3단계: GraphiQL에서 4개 쿼리 검증**
 
 스키마만 있고 resolver는 아직 비어 있어도, GraphiQL은 **introspection으로 자동완성**을 줘요. 4개 쿼리를 적어보면서 어색한 부분(필드명, 관계 방향, nullability)을 다듬으세요.
