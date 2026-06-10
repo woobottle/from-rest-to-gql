@@ -8,8 +8,9 @@ import type { Context } from "./context";
 // viewer는 context.viewer로 접근하세요.
 // ─────────────────────────────────────────────────────────────
 
-export const resolvers = {
-  Query: {
-    hello: (_parent: unknown, _args: unknown, _ctx: Context) => "world",
-  },
-};
+// Step 3 에서 각 type/field 의 resolver 를 채운다.
+// Step 2(스키마 설계)에서는 비워 둬도 GraphiQL introspection/자동완성은 동작한다.
+// (참고: Context 는 Step 3 resolver 에서 context.rest / context.viewer 로 쓰인다.)
+export const resolvers: Record<string, unknown> = {};
+
+export type { Context };
