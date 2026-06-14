@@ -1,19 +1,7 @@
 import { useQuery } from "@apollo/client";
 import { Stack } from "@gql-book-review/shared-ui";
 import { ReviewCard } from "../components/ReviewCard";
-import { graphql } from "../gql";
-
-const HomeFeedQuery = graphql(`
-  query HomeFeed($cursor: String) {
-    homeFeed(first: 20, after: $cursor) {
-      reviews {
-        id
-        ...ReviewCard_review
-      }
-      nextCursor
-    }
-  }
-`);
+import { HomeFeedQuery } from "../operations/queries";
 
 export function HomeFeedPage() {
   const { data, loading, error } = useQuery(HomeFeedQuery);

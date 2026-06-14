@@ -1,26 +1,17 @@
-import { useQuery } from "@apollo/client";
-import { Card, Stack } from "@gql-book-review/shared-ui";
-import { useState } from "react";
+import { useMutation, useQuery } from "@apollo/client";
+import { Button, Card, Stack } from "@gql-book-review/shared-ui";
+import { useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
 import { ReviewCard } from "../components/ReviewCard";
 import { graphql } from "../gql";
+import { BookDetailQuery, HomeFeedQuery } from "../operations/queries";
 
-const BookDetailQuery = graphql(`
-  query BookDetail($id: ID!, $cursor: String) {
-    book(id: $id) {
-      id
-      title
-      author
-      coverUrl
-      averageRating
-      reviewCount
-      description
-      reviews(first: 20, after: $cursor) {
-        reviews {
-          id
-          ...ReviewCard_review
-        }
-        nextCursor
+const CreateReviewMutation = graphql(`
+  mutation CreateReview($input: CreateReviewInput!) {
+    createReview(input: $input) {
+      __typename
+      ... on MutationError {
+        message
       }
     }
   }
@@ -29,10 +20,53 @@ const BookDetailQuery = graphql(`
 export function BookDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [expanded, setExpanded] = useState(false);
+  const [rating, setRating] = useState(5);
+  const [content, setContent] = useState("");
+  const [createFeedback, setCreateFeedback] = useState<string | null>(null);
   const { data, loading, error } = useQuery(BookDetailQuery, {
     variables: { id: id! },
     skip: !id,
   });
+  const [createReview, { loading: creating }] = useMutation(
+    CreateReviewMutation,
+  );
+
+  async function handleCreateReview(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!id || content.trim() === "") return;
+    setCreateFeedback(null);
+
+    try {
+      const result = await createReview({
+        variables: {
+          input: {
+            bookId: id,
+            rating,
+            content: content.trim(),
+          },
+        },
+        refetchQueries: [
+          { query: BookDetailQuery, variables: { id } },
+          { query: HomeFeedQuery },
+        ],
+        awaitRefetchQueries: true,
+      });
+      const payload = result.data?.createReview;
+      if (payload?.__typename !== "ReviewSuccess") {
+        setCreateFeedback(payload?.message ?? "리뷰 작성에 실패했습니다.");
+        return;
+      }
+
+      setContent("");
+      setCreateFeedback("리뷰를 작성하고 관련 목록을 다시 조회했습니다.");
+    } catch (mutationError) {
+      setCreateFeedback(
+        mutationError instanceof Error
+          ? mutationError.message
+          : "리뷰 작성에 실패했습니다.",
+      );
+    }
+  }
 
   if (loading) return <div>불러오는 중…</div>;
   if (error) return <div>에러: {error.message}</div>;
@@ -61,6 +95,49 @@ export function BookDetailPage() {
             {expanded && <p style={{ marginTop: 8 }}>{book.description}</p>}
           </Stack>
         </Stack>
+      </Card>
+
+      <Card>
+        <form onSubmit={handleCreateReview}>
+          <Stack gap={12}>
+            <h3 style={{ margin: 0 }}>리뷰 작성</h3>
+            <label>
+              별점{" "}
+              <select
+                value={rating}
+                onChange={(event) => setRating(Number(event.target.value))}
+                disabled={creating}
+              >
+                {[5, 4, 3, 2, 1].map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <textarea
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              placeholder="리뷰를 입력하세요"
+              rows={4}
+              required
+              disabled={creating}
+              style={{ padding: 8, resize: "vertical" }}
+            />
+            <Button
+              type="submit"
+              disabled={creating || content.trim() === ""}
+              style={{ alignSelf: "flex-start" }}
+            >
+              {creating ? "작성 후 목록 갱신 중…" : "리뷰 작성"}
+            </Button>
+            {createFeedback && (
+              <span style={{ color: "#6b7280", fontSize: 12 }}>
+                {createFeedback}
+              </span>
+            )}
+          </Stack>
+        </form>
       </Card>
 
       <h3 style={{ margin: "16px 0 0" }}>리뷰 {book.reviewCount}개</h3>

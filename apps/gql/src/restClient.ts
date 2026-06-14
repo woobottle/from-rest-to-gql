@@ -25,13 +25,16 @@ export class RestError extends Error {
 }
 
 export function createRestClient(viewerId: string | null): RestClient {
-  const baseHeaders: Record<string, string> = { "Content-Type": "application/json" };
+  const baseHeaders: Record<string, string> = {};
   if (viewerId) baseHeaders["X-Viewer-Id"] = viewerId;
 
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const headers = { ...baseHeaders };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+
     const res = await fetch(`${REST_BASE_URL}${path}`, {
       method,
-      headers: baseHeaders,
+      headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     if (res.status === 204) return undefined as T;

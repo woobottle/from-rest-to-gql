@@ -38,5 +38,10 @@ export function createLoaders(rest: RestClient) {
       const likedSet = new Set(res.items);
       return reviewIds.map((id) => likedSet.has(id)); // key 순서대로 boolean
     }),
+
+    review: new DataLoader<string, unknown>(async (ids) => {
+      console.log(`[loader] review batch → ${ids.length}건`, ids);
+      return Promise.all(ids.map((id) => rest.get(`/reviews/${id}`)));
+    })
   };
 }
