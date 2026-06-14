@@ -101,7 +101,7 @@ type ReviewConnection {
 }
 
 type BookConnection {
-  books: [Book!]
+  books: [Book!]!
   nextCursor: String
 }
 
