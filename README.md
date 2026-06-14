@@ -536,6 +536,36 @@ const resolvers = {
 - 같은 4개 화면에 대해 호출 수, waterfall 깊이, 사용 비율을 다시 측정해서 README에 표 추가
 - 정직하게 — **어떤 항목은 별로 안 바뀌는지**도 함께 정리
 
+#### Step 1 ↔ Step 5 비교표
+
+측정 단위에 주의: **호출 수/waterfall/사용 비율은 "브라우저 → 서버" 기준**이다.
+"서버(gql) → REST" 호출은 별도 열로 분리해 둔다 — 여기가 핵심이다.
+
+| 화면 | 브라우저 호출 수 | waterfall(클라) | 사용 비율 | gql→REST 호출 수 |
+| --- | --- | --- | --- | --- |
+| 홈 피드 | 100 → **1** | 3단계 → **1단계** | 6/34(~18%) → **~100%** | 100 → (naive)100 → (DataLoader)**~3** |
+| 책 상세 | 22 → **1** | 3단계 → **1단계** | 낮음 → **~100%** | 22 → (naive)22 → (DataLoader)**~3** |
+| 유저 프로필 | 28 → **1** | 3단계 → **1단계** | 낮음 → **~100%** | 28 → (naive)28 → (DataLoader)**~3** |
+| 검색 | 1 → **1** | 1단계 → **1단계** | 부분 → **~100%** | 1 → **1** |
+
+#### 정직한 결론 — 무엇이 줄고 무엇이 안 줄었나
+
+**확 줄어든 것 (= 클라이언트가 느끼는 통증):**
+
+- **브라우저 ↔ 서버 왕복**: 화면당 N개 REST → 단일 query 1개. 홈 100→1 이 가장 극적.
+- **클라이언트 waterfall 깊이**: 3단계 → 1단계. 의존 사슬을 클라이언트가 더 이상 직접 타지 않는다.
+- **over-fetch(사용 비율)**: query에 필요한 필드만 적으니 받은 필드의 거의 전부를 쓴다.
+- **클라이언트 조합 코드**: `useEffect` 폭포 + 수동 머지 로직이 사라진다.
+
+**별로 안 줄어든 것 (= GraphQL "만으로는" 안 줄어드는 것):**
+
+- **시스템 전체 REST 호출 총량**: gql(BFF)이 대신 그 N번을 부른다. waterfall은 사라진 게 아니라 **서버 안으로 이동**했을 뿐(→ 위 표의 `gql→REST` 열). 줄이려면 **Step 4 DataLoader**가 필요하고, 그건 GraphQL이 아니라 batching 덕이다.
+- **백엔드 실제 작업량 / REST·DB 부하**: 같은 데이터를 누군가는 여전히 모아야 한다.
+- **TTFB**: 단일 query여도 서버가 내부 의존 호출을 직렬로 타면 첫 바이트까지 시간은 크게 안 준다. 오히려 **gql 홉이 하나 더** 생긴다.
+
+> 한 줄 요약: 클라이언트의 통증(왕복·waterfall·over-fetch)은 극적으로 줄지만,
+> 시스템 전체 호출량·백엔드 부하·TTFB는 GraphQL만으로는 거의 안 줄고 **DataLoader가 있어야** 준다.
+
 ### ✅ 완료 기준
 
 - [ ] 4개 화면 모두 단일 query + fragment colocation으로 구성
@@ -592,24 +622,43 @@ const resolvers = {
 - throw / union payload 중 한 방식을 골라 구현하고 README에 근거 남기기
 - 다른 mutation들도 같은 정책을 따르도록 일관성 유지
 
+**선택: union payload**
+
+권한 없음, 미인증, 잘못된 입력, 대상 없음은 클라이언트가 복구하거나 안내할 수 있는 **예상 가능한 비즈니스 실패**다. 따라서 이 경우에는 throw하지 않고 `NotAuthorized`, `NotAuthenticated`, `InvalidInput`, `NotFound`를 mutation 결과 union의 멤버로 반환한다. 클라이언트는 `__typename`으로 성공과 실패를 타입 안전하게 구분할 수 있다.
+
+반면 REST `5xx`, 네트워크 장애처럼 정상 흐름으로 처리할 수 없는 실패는 그대로 throw하여 GraphQL 응답의 `errors[]`에 담는다. 리뷰 작성/수정/삭제, 좋아요/취소, 팔로우/취소 mutation 모두 같은 기준을 적용한다.
+
 **3단계: 클라이언트 — 캐시 업데이트 4가지 직접 시도**
 
 같은 좋아요 토글을 4가지 방식으로 구현해보고, 각 방식에서 다음을 측정:
 
 | 방식                             | 네트워크 호출 수 | UI 반응 속도 | 코드 양 | 실패 시 동작 |
 | -------------------------------- | ---------------- | ------------ | ------- | ------------ |
-| `refetchQueries`                 |                  |              |         |              |
-| `update` 함수                    |                  |              |         |              |
-| `optimisticResponse` + `update`  |                  |              |         |              |
-| mutation 응답에 갱신 entity 포함 |                  |              |         |              |
+| `refetchQueries`                 | 2회 (`mutation` 1 + 활성 query 1) | mutation과 재조회가 끝난 뒤 반영 | 적음 | 기존 캐시 유지, 재조회 성공 시 서버 상태로 동기화 |
+| `update` 함수                    | 1회 | mutation 응답 후 반영 | 중간 | 성공 타입일 때만 수정하므로 기존 캐시 유지 |
+| `optimisticResponse` + `update`  | 1회 | 클릭 즉시 반영 | 많음 | 실제 응답이 실패면 optimistic layer 자동 롤백 |
+| mutation 응답에 갱신 entity 포함 | 1회 | mutation 응답 후 반영 | 클라이언트 코드 가장 적음 | 성공 entity가 없으므로 기존 캐시 유지 |
 
 - 표를 README에 채우고, 좋아요 토글에 본인이 최종 선택한 방식과 근거를 적기
+
+> 호출 수는 브라우저의 GraphQL 요청 기준이다. `refetchQueries`는 활성 query가 N개면 `mutation 1 + refetch N`회가 된다. GraphQL 서버 내부의 REST 호출 수는 별도로 측정해야 한다.
+
+네 방식을 비교한 뒤 좋아요의 최종 구현은 `refetchQueries`로 선택했다. 좋아요 mutation이 `ReviewSuccess`를 반환하면 현재 활성 query를 다시 조회하며, 비교를 위해 만들었던 `update`, `optimisticResponse`, entity response 분기 코드는 제거했다.
 
 **4단계: 다른 mutation에 적용**
 
 - 리뷰 작성 → 홈 피드 / 책 상세의 리뷰 목록이 자동 갱신
 - 리뷰 삭제 → 위 목록에서 자동 사라짐
 - 각각 어떤 캐시 업데이트 방식을 골랐고 왜 그랬는지 README에 한 줄씩
+
+- **리뷰 작성: `refetchQueries`** — 구현이 단순하고 작성 후 서버가 계산한 책의 `reviewCount`, `averageRating`, 리뷰 목록을 한 번에 다시 맞출 수 있어 선택했다. `BookDetail`과 `HomeFeed`를 다시 조회한다.
+- **리뷰 삭제: `cache.evict` + `cache.modify`** — 응답의 `deletedReviewId`로 `Review:id`를 제거하면 홈 피드, 책 상세, 유저 프로필의 정규화된 참조에서 즉시 사라진다. 책과 작성자의 `reviewCount`도 함께 1 감소시킨다.
+
+#### `refetchQueries`와 read replica 주의점
+
+현재 과제는 REST API의 단일 메모리 저장소를 읽고 쓰므로 리뷰 작성 직후 refetch에서 최신 리뷰를 볼 수 있다. 하지만 실제 서비스가 primary DB에 쓰고 read replica에서 조회한다면 replication lag 때문에 mutation은 성공했는데 직후 refetch에는 새 리뷰가 없는 상황이 생길 수 있다.
+
+운영 환경에서는 read-after-write가 필요한 구간을 primary로 라우팅하거나, mutation 응답의 새 entity를 캐시에 먼저 반영한 뒤 replica가 따라잡으면 재동기화하는 전략이 필요하다. 단순 지연 후 재시도는 일관성을 보장하지 못하므로 기본 해결책으로 삼지 않는다.
 
 ### ✅ 완료 기준
 
@@ -634,11 +683,67 @@ const resolvers = {
 - 어떤 화면에서는 REST가 더 단순했을 수도 있어요. 어떤 화면인가요? 왜인가요?
 - "BFF로 REST 호출을 묶기"만으로도 Step 1의 통증 다수가 해결돼요. 그래도 GraphQL을 쓰는 게 더 나은 지점은 어디인가요?
 
+<details>
+<summary>📝 정리 — "REST가 더 단순했던 화면": <b>검색 자동완성</b></summary>
+
+GraphQL의 3대 효능(왕복 줄이기 / waterfall 펴기 / 관계 조합)이 검색에선 **줄일 게 처음부터 없다.**
+
+| 화면 | REST 호출 수 | waterfall | 관계 조합 |
+| --- | --- | --- | --- |
+| 홈 피드 | 100 | 3단계 | 팔로우→리뷰→책·작성자→좋아요 |
+| 책 상세 | 22 | 3단계 | 책→리뷰→작성자 |
+| 유저 프로필 | 28 | 3단계 | 유저→리뷰→책 |
+| **검색** | **1** (`/books?q=`) | **1단계** | **없음 (책 카드만)** |
+
+- **호출 수**: 이미 1번 → GraphQL도 1번. 감소 0.
+- **waterfall**: 이미 평평(1단계). 펼 게 없음.
+- **관계 조합**: 책 카드(`id/title/coverUrl/averageRating`)만 필요. `author`·`reviews` 같은 join이 없어 fragment 조립의 이점도 거의 없음.
+
+검색에서 GraphQL의 유일한 이득은 **over-fetch 트리밍** 하나뿐인데(5개 항목짜리 작은 응답이라 절감 미미), 비용은 실재한다:
+
+- **gql 홉이 하나 더 추가** → 자동완성은 **키 입력마다** 날아가는 지연 민감 화면. 단일 REST 호출 앞에 BFF 홉을 끼우면 가장 중요한 **응답 속도(TTFB)**가 되레 나빠질 수 있음.
+- codegen·fragment·캐시 정규화 **셋업 보일러플레이트**가, 정작 공유할 엔티티 관계도 없는 화면에 부과됨.
+- over-fetch가 거슬리면 REST에 `?fields=`를 추가하는 게 더 싸게 끝남.
+
+> **한 줄**: 화면이 이미 단일·평면 호출이고 가져올 관계가 없으면, GraphQL은 이득은 거의 없고 홉·셋업 비용만 더한다. 검색이 정확히 그 경우.
+
+</details>
+
 ### 2. 스키마의 책임
 
 - viewer-derived field(`likedByMe`)를 `Review` 직접에 둔 선택과 `Viewer` 경유의 선택, 본인은 어디로 갔고 다시 한다면 어떻게 갈 건가요?
 - non-null을 빡세게 둔 선택이 어디서 후회가 됐나요?
 - viewer 의존 필드의 거부 표현으로 `null`을 골랐다면, 클라이언트는 "권한 없음"과 "실제 값이 없음"을 어떻게 구분하나요?
+
+<details>
+<summary>📝 정리 — <code>null</code> 거부 표현의 모호성: "권한 없음" vs "값 없음"</summary>
+
+핵심: **순수하게 `null` 하나만 보면 클라이언트는 구분 못 한다.** 그게 `null`을 고른 대가다.
+우리 스키마엔 이미 "안 모호한 필드"와 "모호한 필드"가 같이 있다(`apps/gql/src/resolvers.ts`):
+
+```ts
+draftContent: isSelf(...)  ? parent.draftContent : null   // 작성자만
+reportCount:  isAdmin(...) ? parent.reportCount  : null   // admin만
+```
+
+- **`reportCount` — 모호하지 않음 ✅** : admin이면 신고 0건이어도 `0`(절대 `null` 아님), 일반 유저면 항상 `null`. → `null`의 의미가 "권한 없음" 하나로 고정.
+- **`draftContent` — 진짜 모호함 ⚠️** : 남이 보면 null(권한 없음), **본인이 봐도 임시저장이 없으면 null**(값 없음). 한 `null`에 두 의미가 충돌. (`email`, `bannedAt`도 같은 구조)
+
+**그럼 어떻게 구분하나 — 3가지**
+
+1. **viewer 컨텍스트로 추론** — `review.author.id === myViewerId`면 "권한 있음" → 이때 null은 *값 없음*. 아니면 *권한 없음*. 단점: **서버 권한 규칙을 클라가 재구현** → 정책 drift 위험.
+2. **권한 플래그를 동반 노출** — `canViewDraft: Boolean!`을 같이 내려서 `canViewDraft=true && draftContent=null`=값 없음 / `false`=권한 없음. 모호함 제거, 대가는 필드 증가.
+3. **구분이 필요한 필드엔 애초에 `null`을 안 쓴다** — `null` 거부는 *권한자에게 값이 항상 보장될 때만* 안전(`reportCount` ✅ / `draftContent` ⚠️).
+
+| | `null` 거부 |
+| --- | --- |
+| 장점 | 단순, 부분 응답 자연스러움(같은 query에서 어떤 필드는 값/어떤 필드는 null) |
+| 단점 | "권한 없음"과 "값 없음"이 의미 충돌 → 둘 다 null인 필드에선 클라가 viewer 컨텍스트로 추론(=정책 중복) |
+| 안전 조건 | 권한자에게 값이 **항상 보장**되는 필드에만 |
+
+> 그래서 이 프로젝트는 **필드 가시성 = null** / **mutation 거부 = union(Step 6)**으로 표현을 갈라뒀다. 필드 레벨에서 union/errors는 부분 응답을 복잡하게 만들고, mutation은 단일 결과라 union이 자연스럽다.
+
+</details>
 
 ### 3. 캐시의 신뢰
 
@@ -646,6 +751,58 @@ const resolvers = {
 - 두 화면이 같은 entity를 다르게 캐시하면 어떤 사용자 경험 문제가 생기나요?
 - 캐시를 **신뢰하지 못하는** 데이터는 어떤 종류인가요? (예: 평균평점)
 - Step 6의 4가지 캐시 업데이트 방식 중, 본인은 어떤 상황에 어떤 걸 기본값으로 쓸 건가요?
+
+<details>
+<summary>📝 정리 — 캐시의 신뢰 (깨짐 / 불일치 / 못 믿는 데이터 / 갱신 전략)</summary>
+
+**Q1. 정규화 캐시가 깨지는 경우 — `__typename`/`id` 누락 말고 한 개 더**
+
+**삭제 후 dangling reference.** `deleteReview`로 `Review:r1`을 `evict` 해도, 그 리뷰를 참조하던 `ROOT_QUERY.homeFeed.reviews`·`Book:b1.reviews`·`User:u1.reviews` 리스트엔 `{ __ref: "Review:r1" }`가 남는다. Apollo가 dangling ref를 걸러주긴 하지만, `cache.modify`로 리스트에서 직접 안 빼면 **빈 항목/깜빡임**이나 카운트 불일치가 생긴다.
+
+> 보너스: **페이지네이션 `merge` 정책 누락**. `reviews(first, after)`는 `after`만 다른 같은 ROOT 필드라, `merge`가 없으면 2페이지가 1페이지를 덮어써 무한스크롤이 깨진다(field policy 범주).
+
+**Q2. 두 화면이 같은 entity를 다르게 캐시하면 — UX 문제**
+
+정규화의 약속(**한 엔티티 = 한 저장소 = single source of truth**)이 깨져 사본이 둘이 되면:
+
+- **숫자 불일치**: 책 상세에서 좋아요 → `likeCount` 11, 홈 피드는 여전히 10.
+- **버튼 상태 flicker**: 같은 `User:42`인데 한 사본 `followedByMe=true`, 다른 사본 `false` → 화면 전환마다 바뀜.
+- **갱신이 일부만 전파**: mutation/optimistic이 한 사본만 건드리고 나머지는 stale.
+- 근본 원인: source of truth가 둘이면 **어떤 갱신도 모든 사본을 동시에 못 건드린다.**
+
+**Q3. 캐시를 신뢰 못 하는 데이터 — 종류**
+
+- **집계·파생값**: `averageRating`, `reviewCount`, `likeCount`, `followerCount` — 여러 주체가 동시에 바꿔 내 mutation만으론 못 맞춤.
+- **시간/실시간 의존**: "방금 전", 온라인 여부, 재고·가격.
+- **viewer 의존**: `likedByMe`, `followedByMe`, `draftContent`, `email` — viewer가 바뀌면 같은 키에 다른 답.
+
+> 이 앱의 증거: REST가 `recomputeBookAggregates`로 `averageRating`/`reviewCount`를 **서버에서 재계산**한다(`reviews.ts`). 그런데 `createReview`/`deleteReview`는 그 `Book` 집계를 캐시에서 안 건드림 → 리뷰 작성·삭제 후 책 상세의 평균평점이 **stale**. 대응: `cache-and-network`/짧은 TTL/mutation 응답에 재계산 집계 포함.
+
+**Q4. 4가지 캐시 업데이트 방식 — 무엇을 기본값으로**
+
+판단 기준 한 줄: **무엇이 바뀌는가**로 고른다 — *한 엔티티의 필드* / *리스트 멤버십* / *예측 못 하는 집계*.
+
+| 바뀌는 것 | 기본 선택 | 왜 |
+| --- | --- | --- |
+| 한 엔티티의 필드 | **응답에 entity 포함** | `__typename:id`로 자동 머지, update 불필요, 가장 쌈 |
+| 그 필드가 고빈도 토글 | **optimisticResponse +** 응답 entity | 즉시 반영, 서버 왕복 안 기다림 |
+| 리스트 추가/삭제 | **`update` 함수** | 멤버십 변경은 응답 entity만으론 못 함 |
+| 예측 못 하는 집계·정렬 | **`refetchQueries`** | 로컬 재계산 부정확 → 정확성 우선, 최후 수단 |
+
+이 앱 mutation별 기본값:
+
+| mutation | 변화 성격 | 기본값 |
+| --- | --- | --- |
+| `likeReview`/`unlikeReview` | 단일 엔티티 토글 | `refetchQueries` |
+| `followUser`/`unfollowUser` | 단일 엔티티 토글 | optimistic + 응답 User |
+| `updateReview` | 단일 엔티티 필드 수정 | 응답 Review 포함 |
+| `createReview` | 리스트 추가 + Book 집계 변동 | `BookDetail` + `HomeFeed` `refetchQueries` |
+| `deleteReview` | 리스트 제거 | `cache.evict` + Book/User `reviewCount` `cache.modify` |
+
+> 디폴트 멘탈모델: **필드 수정 → 응답 entity / 토글 → +optimistic / 리스트 → update / 집계 → refetch.**
+> "전부 refetch"는 게으르고, "전부 optimistic"은 집계에서 거짓말을 한다.
+
+</details>
 
 ### 4. 운영 관점
 

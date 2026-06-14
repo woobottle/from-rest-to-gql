@@ -122,16 +122,22 @@ type Query {
 # ── Mutation ───────────────────
 # 관습: 입력은 input 타입, 출력은 payload 타입으로 분리한다.
 # 모델 타입(Review!)을 input 으로 받지 않는다.
+#
+# 출력은 "union payload" 로 둔다(설계 근거는 README 참고):
+#  - 잘못된 입력 / 권한 없음 / 미인증 / 대상 없음은 "예상 가능한 비즈니스 실패"다.
+#    throw 로 errors[] 에 흘리지 않고, 실패도 결과의 한 종류로 보고
+#    union 의 한 멤버(타입)로 표현한다. 클라이언트는 __typename 으로 분기.
+#  - 진짜 예외(서버 장애 등)만 throw → errors[].
 type Mutation {
-  createReview(input: CreateReviewInput!): ReviewPayload!
-  updateReview(input: UpdateReviewInput!): ReviewPayload!
-  deleteReview(input: DeleteReviewInput!): DeleteReviewPayload!
+  createReview(input: CreateReviewInput!): ReviewResult!
+  updateReview(input: UpdateReviewInput!): ReviewResult!
+  deleteReview(input: DeleteReviewInput!): DeleteReviewResult!
 
-  likeReview(input: LikeReviewInput!): ReviewPayload!
-  unlikeReview(input: LikeReviewInput!): ReviewPayload!
+  likeReview(input: LikeReviewInput!): ReviewResult!
+  unlikeReview(input: LikeReviewInput!): ReviewResult!
 
-  followUser(input: FollowUserInput!): UserPayload!
-  unfollowUser(input: FollowUserInput!): UserPayload!
+  followUser(input: FollowUserInput!): UserResult!
+  unfollowUser(input: FollowUserInput!): UserResult!
 }
 
 input CreateReviewInput {
@@ -154,13 +160,35 @@ input FollowUserInput {
   userId: ID!
 }
 
-type ReviewPayload {
-  review: Review
+# ── Mutation 결과: union payload ──────────────────────────────
+# 모든 에러 멤버가 구현하는 공통 계약. 클라이언트가
+#   ... on MutationError { message }
+# 한 줄로 "어떤 실패든 메시지"를 받을 수 있어 일관성이 생긴다.
+interface MutationError {
+  message: String!
 }
-type DeleteReviewPayload {
-  deletedReviewId: ID
+type InvalidInput implements MutationError { message: String! }     # 입력값/비즈니스 규칙 위반
+type NotAuthenticated implements MutationError { message: String! } # 로그인 안 됨
+type NotAuthorized implements MutationError { message: String! }    # 권한 없음(본인/admin 아님)
+type NotFound implements MutationError { message: String! }         # 대상 리뷰/유저 없음
+
+# 성공 멤버
+type ReviewSuccess {
+  review: Review!
 }
-type UserPayload {
-  user: User
+type DeleteReviewSuccess {
+  deletedReviewId: ID!
+}
+type UserSuccess {
+  user: User!
 }
 
+# "성공 OR 예상 가능한 실패들" 중 하나. 클라이언트는 __typename 으로 분기.
+union ReviewResult = ReviewSuccess | InvalidInput | NotAuthenticated | NotAuthorized | NotFound
+union DeleteReviewResult =
+    DeleteReviewSuccess
+  | InvalidInput
+  | NotAuthenticated
+  | NotAuthorized
+  | NotFound
+union UserResult = UserSuccess | InvalidInput | NotAuthenticated | NotAuthorized | NotFound

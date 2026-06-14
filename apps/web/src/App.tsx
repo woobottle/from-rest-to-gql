@@ -26,6 +26,8 @@ export function App() {
             marginBottom: 24,
             paddingBottom: 16,
             borderBottom: "1px solid #e5e7eb",
+            gap: 16,
+            flexWrap: "wrap",
           }}
         >
           <Stack direction="row" gap={16} align="center">
