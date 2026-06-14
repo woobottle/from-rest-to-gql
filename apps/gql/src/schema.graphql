@@ -101,7 +101,7 @@ type ReviewConnection {
 }
 
 type BookConnection {
-  books: [Book!]!
+  books: [Book!]
   nextCursor: String
 }
 
@@ -164,79 +164,3 @@ type UserPayload {
   user: User
 }
 
-
-# 1) 홈 피드 — 내가 팔로우한 사람들의 최근 리뷰
-query HomeFeed($cursor: String) {
-  homeFeed(first: 20, after: $cursor) {
-    reviews {
-      id
-      rating
-      content
-      likeCount
-      likedByMe
-      createdAt
-      book { id title coverUrl }
-      author { id name avatarUrl }
-    }
-    nextCursor
-  }
-}
-
-# 2) 책 상세 — 책 헤더 + 리뷰 목록
-query BookDetail($id: ID!, $cursor: String) {
-  book(id: $id) {
-    id
-    title
-    coverUrl
-    averageRating
-    reviewCount
-    description
-    reviews(first: 20, after: $cursor) {
-      reviews {
-        id
-        rating
-        content
-        likeCount
-        likedByMe
-        createdAt
-        author { id name avatarUrl }
-      }
-      nextCursor
-    }
-  }
-}
-
-# 3) 유저 프로필 — 프로필 + 그가 쓴 리뷰(책 표지 포함)
-query UserProfile($id: ID!, $cursor: String) {
-  user(id: $id) {
-    id
-    name
-    avatarUrl
-    bio
-    followerCount
-    followingCount
-    reviewCount
-    followedByMe
-    reviews(first: 20, after: $cursor) {
-      reviews {
-        id
-        rating
-        content
-        likeCount
-        likedByMe
-        createdAt
-        book { id title coverUrl }
-        author { id name avatarUrl }
-      }
-      nextCursor
-    }
-  }
-}
-
-# 4) 검색(자동완성) — 책 카드 5개
-query Search($q: String!) {
-  search(query: $q, first: 5) {
-    books { id title coverUrl averageRating }
-    nextCursor
-  }
-}

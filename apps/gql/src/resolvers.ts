@@ -44,6 +44,20 @@ export const resolvers: Record<string, unknown> = {
         },
         book: (_parent: unknown, args: { id: string }, context: Context) => {
             return context.rest.get(`/books/${args.id}`);
+        },
+        user: (_parent: unknown, args: { id: string }, context: Context) => {
+            return context.rest.get(`/users/${args.id}`);
+        },
+        search: async (_parent: unknown, args: { query: string; first?: number; after?: string }, context: Context) => {
+            if (args.query.trim() === "") return { books: [], nextCursor: null }; // 빈 검색어 → 빈 결과 (에러 아님)
+            const res = await context.rest.get<{ items: unknown[]; total: number; page: number; pageSize: number }>(
+                `/books?q=${encodeURIComponent(args.query)}&page=1`,
+            );
+            const hasMore = res.page * res.pageSize < res.total;
+            return {
+                books: res.items,
+                nextCursor: hasMore ? String(res.page + 1) : null,
+            };
         }
     },
 
@@ -104,6 +118,22 @@ export const resolvers: Record<string, unknown> = {
         // admin 만 운영 필드(정지 시각) 노출.
         bannedAt: (parent: { bannedAt: string | null }, _args: unknown, context: Context) => {
             return isAdmin(context) ? parent.bannedAt : null;
+        },
+        reviews: async (parent: { id: string }, args: { first?: number; after?: string }, context: Context) => {
+            const page = args.after ? Number(args.after) : 1;
+            const res = await context.rest.get<{ items: unknown[]; total: number; page: number; pageSize: number }>(
+                `/users/${parent.id}/reviews?page=${page}`,
+            );
+            const hasMore = res.page * res.pageSize < res.total;
+            return {
+                reviews: res.items, // 각 item 은 아직 authorId/bookId 만 가진 raw Review
+                nextCursor: hasMore ? String(res.page + 1) : null,
+            };
+        },
+        followedByMe: async (parent: { id: string }, _args: unknown, context: Context) => {
+            if (!context.viewer) return false;
+            const { items: followingIds } = await context.rest.get<{ items: string[] }>(`/users/${context.viewer.id}/following`);
+            return followingIds.includes(parent.id);
         }
     }
 };

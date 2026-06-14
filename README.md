@@ -505,6 +505,32 @@ const resolvers = {
 - 같은 `User:42`가 홈 피드와 책 상세 양쪽에서 한 객체로 저장되는지
 - `__typename`이나 `id`를 일부러 빼서 깨뜨리고 어떤 일이 일어나는지 관찰
 
+**관찰 1 — 정규화: 같은 객체는 한 번만 저장된다**
+
+`cache.extract()`를 찍으면 응답이 화면 모양 그대로가 아니라 **`타입:id` 키의 평탄한 엔티티 맵**으로 저장돼 있어요. 관계는 값이 아니라 **`__ref` 포인터**로 연결됩니다.
+
+```
+{
+  "Review:r3": {
+    "__typename": "Review", "id": "r3", "rating": 4,
+    "author": { "__ref": "User:u5" },     // 값이 아니라 참조
+    "book":   { "__ref": "Book:b1" }
+  },
+  "User:u5": { "__typename": "User", "id": "u5", "name": "하은", "avatarUrl": "…" },
+  "ROOT_QUERY": {
+    "homeFeed({\"first\":20})": { "reviews": [ { "__ref": "Review:r3" }, "…" ] }
+  }
+}
+```
+
+→ `User:u5`가 홈 피드든 책 상세든 어디서 등장하든 **엔티티는 캐시에 딱 하나**. 여러 리뷰가 같은 `{ "__ref": "User:u5" }`를 가리켜요. 그래서 그 하나만 고치면 **그 유저를 쓰는 모든 화면이 같이 갱신**됩니다.
+
+**관찰 2 — 깨뜨리기: `__typename`이나 `id`가 빠지면**
+
+캐시 키(`__typename:id`)를 못 만들어 **정규화가 풀려요**. `User:` 엔티티가 사라지고, author 객체가 리뷰마다 **통째로 복제**(`__ref` 대신 값이 인라인)됩니다. 화면은 멀쩡해 보여도 한 곳을 갱신하면 나머지가 **stale**이 됩니다.
+
+> 재현: `InMemoryCache({ typePolicies: { User: { keyFields: false } } })`로 정규화를 잠깐 끄고, DevTools `Cache` 탭(또는 `cache.extract()`)에서 `User:` 키가 사라지고 author가 리뷰마다 복제되는 걸 확인 → 끝나면 원복.
+
 **4단계: Step 1과 다시 비교**
 
 - 같은 4개 화면에 대해 호출 수, waterfall 깊이, 사용 비율을 다시 측정해서 README에 표 추가

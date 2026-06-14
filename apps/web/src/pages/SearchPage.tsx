@@ -1,35 +1,27 @@
+import { useQuery } from "@apollo/client";
 import { Stack } from "@gql-book-review/shared-ui";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { BookCard } from "../components/BookCard";
-import { apiGet } from "../lib/api";
+import { graphql } from "../gql";
 
-// ─────────────────────────────────────────────────────────────
-// Step 1에서 채워 넣을 자리:
-//   - 아래 `results`를 REST 호출 결과로 교체하세요.
-//   - 화면이 필요로 하는 데이터: 책 카드 5개 (id, title, coverUrl, averageRating)
-//   - 응답에 description, ISBN, 출판사, 카테고리 등이 다 같이 옵니다.
-//     → over-fetch 비율을 측정해서 README에 적기
-//
-// 힌트:
-//   1) GET /books?q=<검색어>&page=1 → 결과 목록
-// ─────────────────────────────────────────────────────────────
+const SearchQuery = graphql(`
+  query Search($q: String!) {
+    search(query: $q, first: 5) {
+      books {
+        id
+        ...BookCard_book
+      }
+      nextCursor
+    }
+  }
+`);
 
 export function SearchPage() {
   const [q, setQ] = useState("");
-  // TODO: 검색어가 바뀔 때 GET /books?q=... 호출해서 results 교체
-  const [results, setResults] = useState([]);
-
-  useEffect(() => {
-    const fetchResults = async () => {
-      if (q.trim() === "") {
-        setResults([]);
-        return;
-      }
-      const res = await apiGet(`/books?q=${encodeURIComponent(q)}&page=1`);
-      setResults(res.items);
-    };
-    fetchResults();
-  }, [q]);
+  const { data, loading } = useQuery(SearchQuery, {
+    variables: { q },
+    skip: q.trim() === "",
+  });
 
   return (
     <Stack gap={16}>
@@ -41,7 +33,7 @@ export function SearchPage() {
         style={{ padding: "8px 12px", maxWidth: 400 }}
       />
       <Stack direction="row" gap={12}>
-        {results.slice(0, 5).map((book) => (
+        {data?.search?.books?.map((book) => (
           <BookCard key={book.id} book={book} />
         ))}
       </Stack>
