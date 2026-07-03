@@ -1,62 +1,57 @@
+import { useQuery } from "@apollo/client";
 import { Card, Stack } from "@gql-book-review/shared-ui";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useParams } from "react-router-dom";
 import { ReviewCard } from "../components/ReviewCard";
-import { dummyBookDetail } from "../dummy";
-import { apiGet } from "../lib/api";
+import { graphql } from "../gql";
 
-// ─────────────────────────────────────────────────────────────
-// Step 1에서 채워 넣을 자리:
-//   - 아래 `data`를 REST 호출 결과로 교체하세요.
-//   - 화면이 필요로 하는 데이터:
-//     * 상단: 책 표지·제목·평균평점만 큰 영역, 설명은 접힘
-//     * 하단: 리뷰 목록 — 작성자 이름·아바타 / 별점 / 본문 / 좋아요 수 / 내 좋아요 여부
-//
-// 힌트:
-//   1) GET /books/:id → 책 1개 (description, ISBN 등 풀 페이로드)
-//      → 화면이 안 쓰는 필드의 비율을 측정해서 README에 적기
-//   2) GET /books/:id/reviews → 리뷰 목록 (작성자는 authorId만)
-//   3) 각 리뷰의 작성자 → GET /users/:id × N (waterfall + N+1)
-//   4) GET /me/likes?reviewIds=... → 내 좋아요 여부
-// ─────────────────────────────────────────────────────────────
+const BookDetailQuery = graphql(`
+  query BookDetail($id: ID!, $cursor: String) {
+    book(id: $id) {
+      id
+      title
+      author
+      coverUrl
+      averageRating
+      reviewCount
+      description
+      reviews(first: 20, after: $cursor) {
+        reviews {
+          id
+          ...ReviewCard_review
+        }
+        nextCursor
+      }
+    }
+  }
+`);
 
 export function BookDetailPage() {
+  const { id } = useParams<{ id: string }>();
   const [expanded, setExpanded] = useState(false);
-  const [book, setBook] = useState();
-  const [reviews, setReviews] = useState([]);
-  
-  useEffect(() => {
-    const fetchBookDetail = async () => { 
-      const bookId = 'b1'; // 실제로는 URL에서 ID를 읽어와야겠죠?
-      const bookRes = await apiGet(`/books/${bookId}`);
-      const reviewsRes = await apiGet(`/books/${bookId}/reviews`);
-      const reviews = reviewsRes.items;
-      for (const r of reviews) {
-        const author = await apiGet(`/users/${r.authorId}`);
-        r.author = author;
-      }
-      for (const r of reviews) {
-        const likeRes = await apiGet(`/me/likes?reviewIds=${r.id}`);
-        r.likedByMe = likeRes.items.includes(r.id);
-      }
-      setBook(bookRes);
-      setReviews(reviews);
-    };
-    fetchBookDetail();
-  }, []);
+  const { data, loading, error } = useQuery(BookDetailQuery, {
+    variables: { id: id! },
+    skip: !id,
+  });
 
-  if(book === undefined) {
-    return <div>Loading...</div>;
-  }
+  if (loading) return <div>불러오는 중…</div>;
+  if (error) return <div>에러: {error.message}</div>;
+
+  const book = data?.book;
+  // book(id:)는 nullable → 못 찾으면 null. 스키마가 "없을 수 있다"고 말하므로 분기 강제.
+  if (!book) return <div>책을 찾을 수 없어요.</div>;
 
   return (
     <Stack gap={16}>
       <Card>
         <Stack direction="row" gap={16}>
-          <img src={book.coverUrl} alt="" width={120} height={180} />
+          <img src={book.coverUrl ?? undefined} alt="" width={120} height={180} />
           <Stack gap={8}>
             <h2 style={{ margin: 0 }}>{book.title}</h2>
             <span style={{ color: "#6b7280" }}>{book.author}</span>
-            <span>★ {book.averageRating.toFixed(1)} · 리뷰 {book.reviewCount}개</span>
+            <span>
+              ★ {book.averageRating.toFixed(1)} · 리뷰 {book.reviewCount}개
+            </span>
             <button
               onClick={() => setExpanded((v) => !v)}
               style={{ alignSelf: "flex-start", marginTop: 8 }}
@@ -68,8 +63,9 @@ export function BookDetailPage() {
         </Stack>
       </Card>
 
-      <h3 style={{ margin: "16px 0 0" }}>리뷰 {reviews.length}개</h3>
-      {reviews.map((review) => (
+      <h3 style={{ margin: "16px 0 0" }}>리뷰 {book.reviewCount}개</h3>
+      {book.reviews.reviews.map((review) => (
+        // 책 상세에서는 이미 어떤 책인지 알기 때문에 표지 중복 표시는 생략(showBook=false).
         <ReviewCard key={review.id} review={review} />
       ))}
     </Stack>

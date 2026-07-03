@@ -3,7 +3,11 @@ dist
 .turbo
 .vite
 *.log
+*.tsbuildinfo
 .DS_Store
 .env
 .env.*
 !.env.example
+
+# graphql-codegen client preset 산출물 (빌드 때 다시 생성됨)
+apps/web/src/gql

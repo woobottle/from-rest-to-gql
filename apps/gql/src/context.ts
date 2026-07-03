@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import { createRestClient, type RestClient } from "./restClient";
+import { createLoaders, type Loaders } from "./loaders";
 
 export type Viewer = {
   id: string;
@@ -10,6 +11,7 @@ export type Viewer = {
 export type Context = {
   viewer: Viewer | null;
   rest: RestClient;
+  loaders: Loaders;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -26,16 +28,17 @@ export type Context = {
 export async function buildContext(req: IncomingMessage): Promise<Context> {
   const viewerId = headerValue(req, "x-viewer-id");
   const rest = createRestClient(viewerId);
-
+  // ★ 요청마다 새 loaders. 이 객체는 이 요청 동안만 산다(request-scoped).
+  const loaders = createLoaders(rest);
   if (!viewerId) {
-    return { viewer: null, rest };
+    return { viewer: null, rest, loaders };
   }
 
   try {
     const me = await rest.get<Viewer>("/auth/me");
-    return { viewer: me, rest };
+    return { viewer: me, rest, loaders };
   } catch {
-    return { viewer: null, rest };
+    return { viewer: null, rest, loaders };
   }
 }
 
